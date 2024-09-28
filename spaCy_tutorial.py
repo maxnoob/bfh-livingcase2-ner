@@ -16,10 +16,10 @@ with open ("./alice_in_wonderland_text.txt","r") as f:
     python3 -m spacy download de_dep_news_trf """
    # python3 -m spacy validate # to validate compatibility of models with spacy-version
     
-    import spacy
-    nlp = spacy.load("en_core_web_trf") # für deutsch-accuracy: de_dep_news_trf
-    
-    chapter1 = chapters[0]
-    doc = nlp(chapter1)
-    sentences = list(doc.sents)
-    print(sentences[0])
+import spacy
+nlp = spacy.load("en_core_web_trf") # für deutsch-accuracy: de_dep_news_trf
+
+chapter1 = chapters[0]
+doc = nlp(chapter1)
+sentences = list(doc.sents)
+print(sentences[0])

@@ -32,6 +32,7 @@ install spaCy
 
 import spacy
 import json
+import os
 from spacy.tokens import DocBin
 
 
@@ -130,15 +131,14 @@ json_files = [
     "Albers",
     "Amanda_Alzheimer"
 ]
-output_dir = "./spacy_training_data"
+annotation_dir = "./Datasets/GraSSCo/annotation/grascco_phi_annotation_json"
+training_dir = "./spacy_training_data"
+os.makedirs(training_dir, exist_ok=True)
 
 def parse_json_annotations_to_spacy_format(json_file):
     print("Parsing %s" % json_file)
-    json_input_path = "./Datasets/GraSSCo/annotation/grascco_phi_annotation_json/"
-    json_files_name_extension = ".txt_phi.json"
-    json_file_full_path = "%s%s%s" % (json_input_path, json_file, json_files_name_extension)
     
-    with open(json_file_full_path, 'r', encoding='utf-8') as f:
+    with open(json_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
     # Extract the original text (sofaString) and the annotations
@@ -162,9 +162,13 @@ def parse_json_annotations_to_spacy_format(json_file):
 
 # --- save the annotations in the spacy format ----
 # Function to create individual .spacy files
-def create_individual_training_files(json_files, output_dir):
+def create_individual_training_files(input_dir, output_dir):
     nlp = spacy.blank("de")  # Adjust language if necessary
-    for json_file in json_files:
+    # Get all files in the folder
+    files = [f for f in os.listdir(input_dir) if f.endswith('.json')]
+    print(files)
+    for file in files:
+        json_file = os.path.join(input_dir, file)
         # Parse the JSON to spaCy format
         spacy_format_data = parse_json_annotations_to_spacy_format(json_file)
         
@@ -180,7 +184,7 @@ def create_individual_training_files(json_files, output_dir):
             db.add(doc)
         
         # Save the .spacy file with the name of the JSON file (without extension)
-        output_path = f"{output_dir}/{json_file}.spacy"
+        output_path = f"{output_dir}/{file.replace('.json','.spacy')}"
         db.to_disk(output_path)
 
-create_individual_training_files(json_files, output_dir)
+create_individual_training_files(annotation_dir, training_dir)

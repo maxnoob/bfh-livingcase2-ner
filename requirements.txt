@@ -1,0 +1,4 @@
+#numpy<2
+spacy
+de_dep_news_trf
+de_core_news_lg

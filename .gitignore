@@ -1,1 +1,5 @@
-.venv/
+.envs/
+**/.DS_Store
+.vscode/
+Models/
+spacy_training_data/

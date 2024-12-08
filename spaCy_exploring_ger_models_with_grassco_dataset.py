@@ -38,15 +38,6 @@ with open ("./Datasets/GraSSCo/corpus/Albers.txt","r") as f:
     text = f.read().replace("\n", " ") # replace line breaks, so that sentences stay coherent.
     # print(text) # print whole text file
 
-"""
----- solution to model loading problems: upgrade spaCy with 'pip install -U spacy' ----
-current setup:
-spaCy version    3.8.2   
-Platform         macOS-12.7.6-x86_64-i386-64bit
-Python version   3.11.0                        
-Pipelines        en_core_web_sm (3.8.0), de_dep_news_trf (3.8.0)
-"""
-
 # ----- also tried older python and spacy version --------
 """ working for now with this stable setup
 spaCy version    3.7.5                         
@@ -54,6 +45,7 @@ Platform         macOS-12.7.6-x86_64-i386-64bit
 Python version   3.9.13                        
 Pipelines        de_core_news_lg     """
 # entity recognition and sentence splitting still not working in german. only recognizes nouns
+# solution to model loading problems: upgrade spaCy with 'pip install -U spacy' 
 
 # ---- models (german) ----
 
@@ -117,7 +109,7 @@ for ent in ents:
         
 print("\nEntities labeled 'ORG':\n%s" % list(organziations))
 
-# as seen by the output, the labeling is very poor
+# -----> as seen by the output, the labeling is very poor.
 
 for ent in ents:
     print("\n %s | %s" % (ent, ent.label_))

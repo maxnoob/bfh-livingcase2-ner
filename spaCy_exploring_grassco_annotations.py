@@ -74,11 +74,6 @@ doc = nlp(text)
 sentences = list(doc.sents)
 print("\nFirst sentence: %s" % sentences[0]) # sentences[0] is the title
 
-# the Ents and Tokens below work with the english models flawlessly
-# with german models
-# - Ents work only with de_core_news_lg (non-transformer) and after adding sentencizer to pipeline
-# - Tokens work only with de_dep_news_trf
-
 # ---- Working with Ents (predefined entities, working only with de_core_news_lg and after adding sentencizer to pipeline) -----
 ents = list(doc.ents)
 print("\nAll entities of the text: %s" % ents)

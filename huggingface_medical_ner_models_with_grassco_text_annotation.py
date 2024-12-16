@@ -3,77 +3,118 @@ from rich import print
 from rich.text import Text
 
 # Load model and tokenizer
-tokenizer = AutoTokenizer.from_pretrained("mschiesser/ner-bert-german")
-model = AutoModelForTokenClassification.from_pretrained("mschiesser/ner-bert-german")
+model_name = "blaze999/Medical-NER"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForTokenClassification.from_pretrained(model_name)
 nlp = pipeline("ner", model=model, tokenizer=tokenizer)
-# previously used: dslim/bert-large-NER, HUMADEX/german_medical_ner, mschiesser/ner-bert-german
+# previously used:
+# blaze999/Medical-NER (base: microsoft/deberta-v3-base) -> Model's max input length: 1000000000000000019884624838656 tokens?!
 
 # Read text file
-text_file = "Albers.txt"
-with open("./Datasets/GraSSCo/corpus/%s"%text_file, "r", encoding="utf-8") as f:
+text_file = "Clausthal.txt"
+with open(f"./Datasets/GraSSCo/corpus/{text_file}", "r", encoding="utf-8") as f:
     text = f.read()
+    
+# Grassco corpus was annotated with entities:
+# NAME PATIENT, NAME DOCTOR, NAME RELATIVE, NAME USERNAME 1, NAME TITLE, NAME EXTERN,
+# DATE,
+# LOCATION STREET, LOCATION ZIP, LOCATION CITY, LOCATION COUNTRY, LOCATION HOSPITAL, LOCATION ORGANIZATION,
+# CONTACT PHONE 1, CONTACT FAX, CONTACT EMAIL,
+# PROFESSION
 
 # Model properties
-max_length = tokenizer.model_max_length  # Typically 512 for BERT
-print(f"Model's max input length: {max_length} tokens")
-stride = max_length // 2  # Overlap for smooth transition
+max_length = tokenizer.model_max_length
+stride = max_length // 2  # Stride is half the max_length for overlapping chunks
+print(f"\nModel's max input length: {max_length} tokens")
 print(f"Used stride: {stride}")
 
 # Process the text in chunks
 ner_results = []
 seen_spans = set()  # Track processed spans
 
-print("Processing %s" % text_file)
+print(f"\nProcessing {text_file}")
+
+def merge_entities(results):
+    """Merge consecutive B- and I- entities into single entities."""
+    merged = []
+    current_entity = None
+
+    for result in results:
+        start, end = result['start'], result['end']
+        label = result['entity'].split("-")[-1]  # Normalize label by removing B-/I-
+
+        if current_entity is None or label != current_entity['entity'] or start != current_entity['end']:
+            # Start a new entity
+            if current_entity:
+                merged.append(current_entity)
+            current_entity = {
+                'entity': label,
+                'start': start,
+                'end': end,
+                'word': text[start:end],
+                'score': result['score']
+            }
+        else:  # Merge with the current entity
+            current_entity['end'] = end
+            current_entity['word'] += text[start:end]
+            current_entity['score'] = max(current_entity['score'], result['score'])
+
+    if current_entity:
+        merged.append(current_entity)
+    return merged
+
 for i in range(0, len(text), stride):
     chunk = text[i:i + max_length]
     chunk_results = nlp(chunk)
-    # Display the processed token count on the same line
     print(f"Processed tokens: {i}", end='\r', flush=True)
+
     # Adjust start/end positions relative to the full text
     for result in chunk_results:
         start = result['start'] + i
         end = result['end'] + i
-        
-        # Avoid duplicate processing
-        if (start, end, result['entity']) not in seen_spans:
-            seen_spans.add((start, end, result['entity']))
-            ner_results.append({
-                'entity': result['entity'],
-                'score': result['score'],
-                'start': start,
-                'end': end,
-                'word': text[start:end]
-            })
-# print raw recognized entities
-print("\n%s"%ner_results)
 
+        merged_results = merge_entities(chunk_results)
 
-# take the original text and highlight the entities
-highlighted_text = Text(text)
+    # Avoid duplicate spans
+    for entity in merged_results:
+        start, end, entity_type = entity['start'], entity['end'], entity['entity']
+        if (start, end, entity_type) not in seen_spans:
+            seen_spans.add((start, end, entity_type))
+            ner_results.append(entity)
 
-# see what entities the model can recognize and assign random colors to them
-from random import shuffle
-entities = set(label.split("-")[-1] for label in model.config.id2label.values() if label != "O")
-available_colors = ["green", "blue", "red", "yellow", "magenta", "cyan"]
-shuffle(available_colors)
-# Create a color mapping
-color_mapping = dict(zip(entities, available_colors[:len(entities)]))
-# Print the color mapping
-print("[bold underline]Assigned Colors for Labels:[/bold underline]")
-for label, color in color_mapping.items():
-    print(f"[{color}]{label}: {color}[/]")
+# Print raw recognized entities
+print("\n[bold underline]Recognized Entities:[/bold underline]")
+for result in ner_results:
+    print(f"{result['word']} [{result['entity']}], Score: {result['score']:.2f}")
 
-# Highlight entities in the text using assigned colors
+# Print supported entities
+supported_entities = set(label.split("-")[-1] for label in model.config.id2label.values() if label != "O")
+print("\n[bold underline]Supported Entities:[/bold underline]")
+for entity in sorted(supported_entities):
+    print(f"• {entity}")
+
+# Annotate the original text
+annotated_text = Text()
+
+last_end = 0
 for entity in sorted(ner_results, key=lambda x: x['start']):
-    entity_type = entity['entity'].split("-")[-1]  # Remove prefix
-    color = color_mapping.get(entity_type, "cyan")  # Default to cyan
-    
-    # Add highlight to the text
-    highlighted_text.stylize(color, entity['start'], entity['end'])
+    start, end, entity_type = entity['start'], entity['end'], entity['entity']
 
-# Print the clean, highlighted text
+    # Add text before the entity
+    annotated_text.append(text[last_end:start])
+    # Add the entity with its label in red
+    annotated_text.append(f"{text[start:end]} ", style="bold yellow")
+    annotated_text.append(f"[{entity_type}]", style="bold red")
+
+    # Update the last processed position
+    last_end = end
+
+# Append remaining text
+annotated_text.append(text[last_end:])
+
+# Print annotated text
 print("\n[bold underline]Annotated Text:[/bold underline]")
-print(highlighted_text)
+print(annotated_text)
 
 
 

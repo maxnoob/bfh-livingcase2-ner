@@ -1,8 +1,9 @@
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
+import sys
 from rich import print
 from rich.text import Text
 import pandas as pd
-from sklearn.metrics import confusion_matrix, classification_report, f1_score, make_scorer
+from sklearn.metrics import confusion_matrix, classification_report, f1_score
 
 # Load model and tokenizer
 model_name = "mschiesser/ner-bert-german"
@@ -33,7 +34,7 @@ model_properties = {
     "Model name": getattr(model, 'name_or_path', 'Unknown'),
     "Base model": model.config.architectures if hasattr(model.config, "architectures") else "Unknown",
     "Model type": model.config.model_type if hasattr(model.config, "model_type") else "Unknown",
-    "Number of labels": model.config.num_labels if hasattr(model.config, "num_labels") else "Unknown",
+    "Number of labels": model.config.num_labels if hasattr(model.config, "num_labels") else "Unknown", # label number is higher that entity number ('B-LOC', 'I-LOC', 'B-ORG', 'I-ORG', 'B-PER', 'I-PER', 'O')
     "Tokenizer name": tokenizer.name_or_path,
     "Tokenizer's max input length (# of tokens)": tokenizer.model_max_length, # Typically 512 for BERT
 }
@@ -153,14 +154,53 @@ def normalize_predicted_entities(predicted_entities):
 def map_annotations(annotations, entity_mapping):
     """
     Maps annotations to a standardized entity type using the provided mapping.
-
-    Returns:
-        list: Mapped annotations with standardized entity types.
+    If the true entity is not in the predicted entity, then it's set to "OTHER".
     """
     return [
         {"start": ann["start"], "end": ann["end"], "entity": entity_mapping.get(ann["entity"], "OTHER")}
         for ann in annotations
     ]
+    
+# Align spans by comparing text overlap
+def align_spans(true_spans, pred_spans):
+    """
+    Checks for overlapping entities of true and predicted annotations.
+    This is done to compensate for not exact matches, since the annotated predictions are very bad (e.g. consecutive B-segments instead of B-, I-, I-).
+    """
+    true_labels = []
+    predicted_labels = []
+    
+    for true_span in true_spans:
+        true_start, true_end, true_label = true_span['start'], true_span['end'], true_span['entity']
+        matched = False
+        
+        for pred_span in pred_spans:
+            pred_start, pred_end, pred_label = pred_span['start'], pred_span['end'], pred_span['entity']
+            
+            # Check for overlap
+            if not (pred_end <= true_start or pred_start >= true_end):
+                true_labels.append(true_label)
+                predicted_labels.append(pred_label)
+                matched = True
+        
+        # Handle unmatched true spans
+        if not matched:
+            true_labels.append(true_label)
+            predicted_labels.append("OUTSIDE")
+    
+    # Handle unmatched predicted spans
+    for pred_span in pred_spans:
+        pred_start, pred_end, pred_label = pred_span['start'], pred_span['end'], pred_span['entity']
+        if not any(
+            not (pred_end <= ts['start'] or pred_start >= ts['end'])
+            for ts in true_spans
+        ):
+            true_labels.append("OUTSIDE")
+            predicted_labels.append(pred_label)
+    
+    return true_labels, predicted_labels
+
+
 
 def f3_score(y_true, y_pred, labels):
     """
@@ -168,35 +208,8 @@ def f3_score(y_true, y_pred, labels):
     https://towardsdatascience.com/is-f1-the-appropriate-criterion-to-use-what-about-f2-f3-f-beta-4bd8ef17e285
     """
     from sklearn.metrics import fbeta_score
-    precision, recall, f_score, _ = fbeta_score(y_true, y_pred, labels=labels, beta=3, average="weighted", zero_division='warn')
+    f_score = fbeta_score(y_true, y_pred, labels=labels, beta=3,  average='weighted', zero_division=0)
     return f_score
-
-def compare_entities(true_spans, predicted_spans):
-    """
-    Compare the true entities (annotated before) with the entities the model predicted
-    """
-    true_labels, pred_labels = [], []
-
-    # Match exact entities
-    for true_start, true_end, true_label in true_spans:
-        matched = False
-        for pred_start, pred_end, pred_label in predicted_spans:
-            if true_start == pred_start and true_end == pred_end:
-                true_labels.append(true_label)
-                pred_labels.append(pred_label)
-                matched = True
-                break
-        if not matched:
-            true_labels.append(true_label)
-            pred_labels.append("NONE")
-
-    # Count unmatched predicted entities
-    for pred_start, pred_end, pred_label in predicted_spans:
-        if not any((pred_start == true_start and pred_end == true_end) for true_start, true_end, _ in true_spans):
-            true_labels.append("NONE")
-            pred_labels.append(pred_label)
-
-    return true_labels, pred_labels
 
 
 import os
@@ -204,12 +217,12 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import json
 
-# Map the entities from model and text corpus
+# Map the entities from model and text corpus (unmapped true entities get mapped to OTHER in the map_annotations-function)
 entity_mapping = {
     "NAME_PATIENT": "PER",
     "NAME_DOCTOR": "PER",
     "NAME_RELATIVE": "PER",
-    "NAME_USERNAME 1": "PER",
+    "NAME_USERNAME_1": "PER",
     "NAME_TITLE": "PER",
     "NAME_EXTERN": "PER",
     "LOCATION_STREET": "LOC",
@@ -226,6 +239,8 @@ json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
 
 # Initialize evaluation containers
 true_entities, predicted_entities = [], []
+total_true_entities_count = 0
+total_predicted_entities_count = 0
 
 # Process each JSON file
 for json_file in json_files:
@@ -266,29 +281,46 @@ for json_file in json_files:
             if span not in seen_spans:
                 seen_spans.add(span)
                 ner_results.append(result)
-    print(f"\nseen spans: {seen_spans}")
-    print(f"\nner_results: {ner_results}")
-    print(f"File: {json_file}, Predicted Entities: {len(ner_results)}")
+    # FOR DEBUGGING:
+    # print(f"\nseen spans: {seen_spans}")
+    # print(f"\nner_results: {ner_results}")
+    print(f"File: {json_file}, predicted entities: {len(ner_results)}")
 
     # Extract predicted entities with spans
     predicted_spans = normalize_predicted_entities(ner_results)
-    print(f"predicted spans: {predicted_spans}")
+    # FOR DEBUGGING:
+    # print(f"predicted spans: {predicted_spans}")
     
     # Extract true entities from annotations
-    print(f"File: {json_file}, True Entities: {len(annotations)}")
-    print(f"annotations {annotations}")
+    print(f"File: {json_file}, true entities: {len(annotations)}")
+    # FOR DEBUGGING:
+    # print(f"annotations {annotations}")
 
-# Compare entities using the compare_entities function
-mapped_annotations = map_annotations(annotations, entity_mapping)
-print(f"mapped annotations: {mapped_annotations}")
-true_labels = [span['entity'] for span in mapped_annotations]
-predicted_labels = [span['entity'] for span in predicted_spans]
+    # Compare entities using the compare_entities function
+    mapped_annotations = map_annotations(annotations, entity_mapping)
+    
+    # Update global counts before alignment
+    total_true_entities_count += len(mapped_annotations)
+    total_predicted_entities_count += len(predicted_spans)
+    
+    # Align true and predicted labels
+    # if no match exists, "OUTSIDE" gets added to the other group, so that true and predicted entities can be compared later
+    # this makes entity count seem higher, which is why we need an additional counter per group for the total count
+    true_labels, predicted_labels = align_spans(mapped_annotations, predicted_spans)
+    # FOR DEBUGGING:
+    # print(f"mapped annotations: {mapped_annotations}")
 
-# Define the labels to be considered
-labels = ["PER", "LOC", "ORG", "OTHER", "NONE"]
+    # Accumulate results across files
+    true_entities.extend(true_labels)
+    predicted_entities.extend(predicted_labels)
+
+print(f"Total predicted entities: {total_predicted_entities_count}, Total true entities: {total_true_entities_count}")
+
+# Define the labels to be considered ('OTHER' doesn't exist for model entities, but is neccessary for matrix)
+labels = ["PER", "LOC", "ORG", "OTHER", "OUTSIDE"]
 
 # Compute confusion matrix
-conf_matrix = confusion_matrix(true_labels, predicted_labels, labels=labels)
+conf_matrix = confusion_matrix(true_entities, predicted_entities, labels=labels)
 
 # Create a DataFrame for visualization
 conf_matrix_df = pd.DataFrame(
@@ -297,23 +329,28 @@ conf_matrix_df = pd.DataFrame(
     columns=[f"{label} (Pred)" for label in labels]
 )
 
-    # Plot confusion matrix
-"""     plt.figure(figsize=(10, 8))
-    sns.heatmap(conf_matrix_df, annot=True, cmap="Blues", fmt="d", cbar=False)
-    plt.title("Confusion Matrix")
-    plt.show()
-    """
-    # Print classification report
+# Display the confusion matrix
+print("\n[bold underline]Confusion matrix:[/bold underline]")
+print(conf_matrix_df)
+
+
+# Plot confusion matrix (for illustration purposes)
+""" plt.figure(figsize=(10, 8))
+sns.heatmap(conf_matrix_df, annot=True, cmap="Blues", fmt="d", cbar=False)
+plt.title("Confusion Matrix")
+plt.show() """
+   
+# Print classification report
 print("\n[bold underline]Classification Report:[/bold underline]")
-print(classification_report(true_entities, predicted_entities, labels=labels))
+print(classification_report(true_labels, predicted_labels, labels=labels, zero_division=0)) # 0 instead of undefined for div by zero
+# weighted average takes the number of true instances of each class into account.
+# if the classes are imbalanced in the data, the weightet average should be considered
 
 # Calculate and print F1 and F3 scores
-overall_f1_score = f1_score(true_entities, predicted_entities, labels=labels, average="weighted")
-overall_f3_score = f3_score(true_entities, predicted_entities, labels=labels)
-
-print(f"\n[bold underline]Overall F1-score: {overall_f1_score:.4f}[/bold underline]")
-print(f"\n[bold underline]Overall F3-score: {overall_f3_score:.4f}[/bold underline]")
-
+overall_f1_score = f1_score(true_labels, predicted_labels, labels=labels,  average='weighted', zero_division=0)
+print(f"[bold]Overall F1-score (weighted): {overall_f1_score:.4f}[/bold]")
+overall_f3_score = f3_score(true_labels, predicted_labels, labels=labels)
+print(f"[bold]Overall F3-score (weighted): {overall_f3_score:.4f}[/bold]")
 
 """ 
 Vizualization of recognized ents with iPython in table quite ok. But colored rich text is easier to read.

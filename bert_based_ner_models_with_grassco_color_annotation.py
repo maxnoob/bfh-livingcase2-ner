@@ -316,6 +316,8 @@ for json_file in json_files:
 
 print(f"Total predicted entities: {total_predicted_entities_count}, Total true entities: {total_true_entities_count}")
 
+print(f"Used model: {model_name}")
+
 # Define the labels to be considered ('OTHER' doesn't exist for model entities, but is neccessary for matrix)
 labels = ["PER", "LOC", "ORG", "OTHER", "OUTSIDE"]
 
@@ -330,9 +332,24 @@ conf_matrix_df = pd.DataFrame(
 )
 
 # Display the confusion matrix
-print("\n[bold underline]Confusion matrix:[/bold underline]")
+print("\n[bold underline]Confusion matrix (with OTHER):[/bold underline]")
 print(conf_matrix_df)
 
+
+# Exclude OTHER for the confusion matrix
+labels_without_other = ["PER", "LOC", "ORG", "OUTSIDE"]
+
+# Compute confusion matrix
+conf_matrix_without_other = confusion_matrix(true_entities, predicted_entities, labels=labels_without_other)
+
+# Create a DataFrame for visualization
+conf_matrix_without_other_df = pd.DataFrame(
+    conf_matrix_without_other, 
+    index=[f"{label} (True)" for label in labels_without_other], 
+    columns=[f"{label} (Pred)" for label in labels_without_other]
+)
+print("\n[bold underline]Confusion Matrix (excluding OTHER):[/bold underline]")
+print(conf_matrix_without_other_df)
 
 # Plot confusion matrix (for illustration purposes)
 """ plt.figure(figsize=(10, 8))
@@ -340,20 +357,37 @@ sns.heatmap(conf_matrix_df, annot=True, cmap="Blues", fmt="d", cbar=False)
 plt.title("Confusion Matrix")
 plt.show() """
    
+# Re-define the target labels (excluding "OTHER" and "OUTSIDE") for calculating the benchmarks
+labels_for_benchmarks = ["PER", "LOC", "ORG"]
+
+# Filter true and predicted labels while maintaining alignment
+filtered_true_labels, filtered_predicted_labels = zip(*[
+    (true_label, pred_label)
+    for true_label, pred_label in zip(true_entities, predicted_entities)
+    if true_label not in ["OUTSIDE", "OTHER"] and pred_label not in ["OUTSIDE", "OTHER"]
+])
+
 # Print classification report
-print("\n[bold underline]Classification Report:[/bold underline]")
-print(classification_report(true_labels, predicted_labels, labels=labels, zero_division=0)) # 0 instead of undefined for div by zero
+print("\n[bold underline]Classification Report (excluding OTHER and OUTSIDE):[/bold underline]")
+print(classification_report(
+    filtered_true_labels, filtered_predicted_labels,
+    labels=labels_for_benchmarks, zero_division=0 # 0 instead of undefined for div by zero
+))
+
 # weighted average takes the number of true instances of each class into account.
 # if the classes are imbalanced in the data, the weightet average should be considered
 
 # Calculate and print F1 and F3 scores
-overall_f1_score = f1_score(true_labels, predicted_labels, labels=labels,  average='weighted', zero_division=0)
+overall_f1_score = f1_score(filtered_true_labels, filtered_predicted_labels, labels=labels_for_benchmarks,  average='weighted', zero_division=0)
 print(f"[bold]Overall F1-score (weighted): {overall_f1_score:.4f}[/bold]")
-overall_f3_score = f3_score(true_labels, predicted_labels, labels=labels)
+overall_f3_score = f3_score(filtered_true_labels, filtered_predicted_labels, labels=labels_for_benchmarks)
 print(f"[bold]Overall F3-score (weighted): {overall_f3_score:.4f}[/bold]")
 
+
 """ 
-Vizualization of recognized ents with iPython in table quite ok. But colored rich text is easier to read.
+Archive of other tested visualitation methods:
+
+Visualization of recognized ents with iPython in table quite ok. But colored rich text is easier to read.
 --------------------------------------------------------------------
 import pandas as pd
 from IPython.display import display
@@ -378,7 +412,7 @@ display(df) """
 
 
 """ 
-Vizualization with termocolor (coloring the annotated text in the terminal) caused problems with ANSI signs, that were generated and made the output partially unreadable
+Visualization with termocolor (coloring the annotated text in the terminal) caused problems with ANSI signs, that were generated and made the output partially unreadable
 --------------------------------------------------------
 from termcolor import colored
 

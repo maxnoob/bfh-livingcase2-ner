@@ -4,7 +4,7 @@ In this case with the model de_core_news_lg, since the model de_dep_news_trf doe
 a NER pipeline.
 
 install spaCy
-    Bevor Installation check, ob / welches environment verwendet wird
+    before installation, check the used environment
 	python -m venv .env # create venv in project folder
     (python3.10 -m venv .python3.10-spacy)
 	source .venv/bin/activate # activate venv
@@ -25,16 +25,12 @@ install spaCy
     python -m spacy info
     """
 
-"""
-    for german language tokenization:
-    python -m spacy download de_dep_news_trf # around 400 mb
-    """
-
 import spacy
 
+text_file = "Albers.txt"
 
 # ---- Read in example text  ----
-with open ("./Datasets/GraSSCo/corpus/Albers.txt","r") as f:
+with open (f"./Datasets/GraSSCo/corpus/{text_file}","r") as f:
     text = f.read().replace("\n", " ") # replace line breaks, so that sentences stay coherent.
     # print(text) # print whole text file
 

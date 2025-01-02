@@ -1,33 +1,46 @@
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
-import sys
 from rich import print
 from rich.text import Text
 import pandas as pd
 from sklearn.metrics import confusion_matrix, classification_report, f1_score
+import os
+import matplotlib.pyplot as plt
+import seaborn as sns
+import json
+from random import shuffle
+from query_model_info import get_full_model_info
 
-# Load model and tokenizer
-model_name = "mschiesser/ner-bert-german"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForTokenClassification.from_pretrained(model_name)
-nlp = pipeline("ner", model=model, tokenizer=tokenizer)
+
+# ------------ LOADING MODEL --------------
+
 # previously used:
 # dslim/bert-large-NER,
 # HUMADEX/german_medical_ner,
 # mschiesser/ner-bert-german: not too bad for person names, sees some diagnoses as orgniasations and medications as locations
 # domischwimmbeck/bert-base-german-cased-fine-tuned-ner (434 MB) -> error while loading the model
+# StanfordAIMI/stanford-deidentifier-base: doesn't annotate in BIO format! annotates entities only. problem arises in span alignment.
 
+# Load model and tokenizer
+# NOTE: mschiesser/ner-bert-german is the only one that properly works for benchmarking
+model_name = "mschiesser/ner-bert-german"
+tokenizer_name = model_name
 
-# Read text file
-text_file = "Clausthal.txt"
-with open(f"./Datasets/GraSSCo/corpus/{text_file}", "r", encoding="utf-8") as f:
-    text = f.read()
-    
-# Grassco corpus was annotated with entities:
-# NAME PATIENT, NAME DOCTOR, NAME RELATIVE, NAME USERNAME 1, NAME TITLE, NAME EXTERN,
-# DATE,
-# LOCATION STREET, LOCATION ZIP, LOCATION CITY, LOCATION COUNTRY, LOCATION HOSPITAL, LOCATION ORGANIZATION,
-# CONTACT PHONE 1, CONTACT FAX, CONTACT EMAIL,
-# PROFESSION
+loaded_model = get_full_model_info(model_name)
+tokenizer = loaded_model["tokenizer"]
+# get nlp pipeline
+nlp = loaded_model["nlp_pipeline"]
+
+# Calculate stride
+max_length = loaded_model.get("tokenizers_max_token_length", 512) # use 512 as default if no max_length is found 
+stride = max_length // 2
+print(f"\nUsed stride: {stride}")
+
+""" 
+print(f"Loading Tokenzier: {tokenizer_name}")
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+print(f"Loading model: {model_name}")
+model = AutoModelForTokenClassification.from_pretrained(model_name)
+nlp = pipeline("ner", model=model, tokenizer=tokenizer)
 
 # Extract model properties
 model_properties = {
@@ -47,7 +60,7 @@ for prop, value in model_properties.items():
 # Calculate stride
 max_length = model_properties.get("Tokenizer's max input length (# of tokens)", 512) # use 512 as default if no max_length is found 
 stride = max_length // 2
-print(f"Used stride: {stride}")
+print(f"\nUsed stride: {stride}")
 
 # Extract supported entities from the model
 supported_entities = set()
@@ -58,7 +71,15 @@ for label in model.config.id2label.values():
 # Print supported entities
 print("\n[bold underline]Supported Entities by the Model:[/bold underline]")
 for entity in sorted(supported_entities):
-    print(f"• {entity}")
+    print(f"• {entity}") """
+    
+    
+# ---------- PROCESSING SINGLE FILE TEXT DATA -------------
+
+# Read text file
+text_file = "Clausthal.txt"
+with open(f"./data/GraSSCo/corpus/{text_file}", "r", encoding="utf-8") as f:
+    text = f.read()
 
 # Process the text in chunks
 ner_results = []
@@ -87,13 +108,11 @@ for i in range(0, len(text), stride):
 # print raw recognized entities
 print("\n%s"%ner_results)
 
-
 # take the original text and highlight the entities
 highlighted_text = Text(text)
 
 # see what entities the model can recognize and assign random colors to them
-from random import shuffle
-entities = set(label.split("-")[-1] for label in model.config.id2label.values() if label != "O")
+entities = set(label.split("-")[-1] for label in loaded_model["model"].config.id2label.values() if label != "O")
 available_colors = ["green", "blue", "red", "yellow", "magenta", "cyan"]
 shuffle(available_colors)
 # Create a color mapping
@@ -115,7 +134,9 @@ for entity in sorted(ner_results, key=lambda x: x['start']):
 print("\n[bold underline]Annotated Text:[/bold underline]")
 print(highlighted_text)
 
-# ----- Draw confusion matrix ------
+
+# ----- PROCESSING THE WHOLE CORPUS WITH ANOTATIONS ------
+
 print("Processing whole corpus")
 
 def normalize_predicted_entities(predicted_entities):
@@ -200,8 +221,6 @@ def align_spans(true_spans, pred_spans):
     
     return true_labels, predicted_labels
 
-
-
 def f3_score(y_true, y_pred, labels):
     """
     Calculates the F3-score (beta=3) to weigh the false negatives (entities that were missed for de-identification) more.
@@ -211,14 +230,17 @@ def f3_score(y_true, y_pred, labels):
     f_score = fbeta_score(y_true, y_pred, labels=labels, beta=3,  average='weighted', zero_division=0)
     return f_score
 
+# --------- MAPPINGS -----------
+# the grassco corpus was annotated with the entities:
+# NAME PATIENT, NAME DOCTOR, NAME RELATIVE, NAME USERNAME 1, NAME TITLE, NAME EXTERN,
+# DATE,
+# LOCATION STREET, LOCATION ZIP, LOCATION CITY, LOCATION COUNTRY, LOCATION HOSPITAL, LOCATION ORGANIZATION,
+# CONTACT PHONE 1, CONTACT FAX, CONTACT EMAIL,
+# PROFESSION
 
-import os
-import matplotlib.pyplot as plt
-import seaborn as sns
-import json
-
-# Map the entities from model and text corpus (unmapped true entities get mapped to OTHER in the map_annotations-function)
-entity_mapping = {
+# Map the entities from model and text corpus
+# unmapped true entities get mapped to OTHER in the map_annotations-function
+entity_mapping_ner_bert_german = {
     "NAME_PATIENT": "PER",
     "NAME_DOCTOR": "PER",
     "NAME_RELATIVE": "PER",
@@ -233,8 +255,26 @@ entity_mapping = {
     "LOCATION_ORGANIZATION": "ORG"
 }
 
+entity_mapping_stanford_deidentifier_base = {
+    "NAME_PATIENT": "PATIENT",
+    "NAME_RELATIVE": "PATIENT",
+    "NAME_TITLE": "PATIENT",
+    "NAME_EXTERN": "PATIENT",
+    "NAME_DOCTOR": "HCW",
+    "NAME_USERNAME_1": "HCW",
+    "DATE": "DATE",
+    "CONTACT_PHONE_1": "PHONE",
+    "CONTACT FAX": "PHONE",
+    "LOCATION HOSPITAL": "HOSPITAL",
+    "LOCATION ORGANIZATION": "HOSPITAL"   
+# unmapped are the model's entities: ID & VENDOR
+# and the dataset's entities: LOCATION STREET, LOCATION ZIP, LOCATION CITY, LOCATION COUNTRY, CONTACT_EMAIL, PROFESSION
+}
+
+# ------ PROCESS JSON FILES AND MAP ANNOTATIONS --------
+
 # Batch file processing
-input_dir = "./Datasets/GraSSCo/annotation/grascco_phi_annotation_json/"
+input_dir = "./data/GraSSCo/annotation/grascco_phi_annotation_json/"
 json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
 
 # Initialize evaluation containers
@@ -296,8 +336,23 @@ for json_file in json_files:
     # FOR DEBUGGING:
     # print(f"annotations {annotations}")
 
-    # Compare entities using the compare_entities function
-    mapped_annotations = map_annotations(annotations, entity_mapping)
+    try:
+        # determine the mapping based on the model
+        if model_name == "mschiesser/ner-bert-german":
+            entity_mapping = entity_mapping_ner_bert_german
+        elif model_name == "StanfordAIMI/stanford-deidentifier-base":
+            entity_mapping = entity_mapping_stanford_deidentifier_base
+        else:
+            raise ValueError(f"No mapping created for this model: {model_name}")
+
+        # Compare entities using the compare_entities function
+        mapped_annotations = map_annotations(annotations, entity_mapping)
+    
+    except ValueError as e:
+        # abort execution
+        print(f"Error: {e}")
+        print("Aborting execution due to unsupported model.")
+        exit(1)  # exit with a non-zero status
     
     # Update global counts before alignment
     total_true_entities_count += len(mapped_annotations)
@@ -318,8 +373,14 @@ print(f"Total predicted entities: {total_predicted_entities_count}, Total true e
 
 print(f"Used model: {model_name}")
 
+
+# ----------- CONFUSION MATRICES ---------------
+
 # Define the labels to be considered ('OTHER' doesn't exist for model entities, but is neccessary for matrix)
-labels = ["PER", "LOC", "ORG", "OTHER", "OUTSIDE"]
+if model_name == "mschiesser/ner-bert-german":
+        labels = ["PER", "LOC", "ORG", "OTHER", "OUTSIDE"]
+elif model_name == "StanfordAIMI/stanford-deidentifier-base":
+        labels = ["PATIENT", "HCW", "DATE", "PHONE", "HOSPITAL", "OTHER", "OUTSIDE"]
 
 # Compute confusion matrix
 conf_matrix = confusion_matrix(true_entities, predicted_entities, labels=labels)
@@ -335,9 +396,11 @@ conf_matrix_df = pd.DataFrame(
 print("\n[bold underline]Confusion matrix (with OTHER):[/bold underline]")
 print(conf_matrix_df)
 
-
 # Exclude OTHER for the confusion matrix
-labels_without_other = ["PER", "LOC", "ORG", "OUTSIDE"]
+if model_name == "mschiesser/ner-bert-german":
+        labels_without_other = ["PER", "LOC", "ORG", "OUTSIDE"]
+elif model_name == "StanfordAIMI/stanford-deidentifier-base":
+        labels_without_other = ["PATIENT", "HCW", "DATE", "PHONE", "HOSPITAL", "OUTSIDE"]
 
 # Compute confusion matrix
 conf_matrix_without_other = confusion_matrix(true_entities, predicted_entities, labels=labels_without_other)
@@ -352,13 +415,27 @@ print("\n[bold underline]Confusion Matrix (excluding OTHER):[/bold underline]")
 print(conf_matrix_without_other_df)
 
 # Plot confusion matrix (for illustration purposes)
-""" plt.figure(figsize=(10, 8))
-sns.heatmap(conf_matrix_df, annot=True, cmap="Blues", fmt="d", cbar=False)
-plt.title("Confusion Matrix")
-plt.show() """
-   
+plt.figure(figsize=(10, 8))
+sns.heatmap(
+    conf_matrix_without_other_df, 
+    annot=True,  # show original values in map
+    cmap="coolwarm",
+    fmt="d", 
+    cbar=True, 
+    vmin=0, 
+    vmax=500 
+)
+plt.title(f"Confusion Matrix of {model_name} used on the GraSCCO dataset")
+plt.show()
+
+
+# -------------- BENCHMARKING --------------
+
 # Re-define the target labels (excluding "OTHER" and "OUTSIDE") for calculating the benchmarks
-labels_for_benchmarks = ["PER", "LOC", "ORG"]
+if model_name == "mschiesser/ner-bert-german":
+        labels_for_benchmarks = ["PER", "LOC", "ORG"]
+elif model_name == "StanfordAIMI/stanford-deidentifier-base":
+        labels_for_benchmarks = ["PATIENT", "HCW", "DATE", "PHONE", "HOSPITAL"]
 
 # Filter true and predicted labels while maintaining alignment
 filtered_true_labels, filtered_predicted_labels = zip(*[

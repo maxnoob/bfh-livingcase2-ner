@@ -14,13 +14,6 @@ nlp = pipeline("ner", model=model, tokenizer=tokenizer)
 text_file = "Clausthal.txt"
 with open(f"./Datasets/GraSSCo/corpus/{text_file}", "r", encoding="utf-8") as f:
     text = f.read()
-    
-# Grassco corpus was annotated with entities:
-# NAME PATIENT, NAME DOCTOR, NAME RELATIVE, NAME USERNAME 1, NAME TITLE, NAME EXTERN,
-# DATE,
-# LOCATION STREET, LOCATION ZIP, LOCATION CITY, LOCATION COUNTRY, LOCATION HOSPITAL, LOCATION ORGANIZATION,
-# CONTACT PHONE 1, CONTACT FAX, CONTACT EMAIL,
-# PROFESSION
 
 # Model properties
 max_length = tokenizer.model_max_length

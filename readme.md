@@ -1,6 +1,6 @@
 # Named Entity Recognition for De-Identification in Medical Texts
 
-This repository is part of my project for the **Living Case 2 module** of the Bachelor’s program in Medical Informatics at the **Bern University of Applied Sciences (BFH)**. The project was developed and implemented by me.
+This repository is part of my project for the **Living Case 2 module** of the Bachelor’s program in Medical Informatics at the **Bern University of Applied Sciences (BFH)**. The project was developed and implemented by the repository owner.
 
 ## About this project
 The goal of this project is to explore and implement Named Entity Recognition (NER) techniques for the de-identification of sensitive information** in medical texts. This involves the identification and removal of personal health information (PHI) such as names, dates, and locations.
@@ -12,13 +12,21 @@ The goal of this project is to explore and implement Named Entity Recognition (N
 
 
 ## Virtual environment
-Create venv in project folder
+Create venv in project folder using the python version 3.9.13
 
-```python3 -m venv .env ```
+```python3.9 -m venv .venv ```
 
 Activate the environment venv
 
 ```source .venv/bin/activate```
+
+(on Windows)
+
+```.venv\Scripts\activate```
+
+Install the requirements for your environment
+
+```pip install -r requirements.txt```
 
 ## GraSCCo corpus
 Since the annotated corpus is only about 13 MB in size, it is already to be found within this project.

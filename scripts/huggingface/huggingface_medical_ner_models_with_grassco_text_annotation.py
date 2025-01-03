@@ -1,25 +1,28 @@
-from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 from rich import print
 from rich.text import Text
+from query_model_info import get_full_model_info
 
-# Load model and tokenizer
-model_name = "blaze999/Medical-NER"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForTokenClassification.from_pretrained(model_name)
-nlp = pipeline("ner", model=model, tokenizer=tokenizer)
 # previously used:
 # blaze999/Medical-NER (base: microsoft/deberta-v3-base) -> Model's max input length: 1000000000000000019884624838656 tokens?!
+# NOTE: BERT models (e.g. HUMADEX/german_medical_ner) with 512 input size not working properly
+
+model_name = "blaze999/Medical-NER"
+tokenizer_name = model_name
+
+loaded_model = get_full_model_info(model_name)
+tokenizer = loaded_model["tokenizer"]
+# get nlp pipeline
+nlp = loaded_model["nlp_pipeline"]
+
+# Calculate stride
+max_length = loaded_model.get("tokenizers_max_token_length", 512) # use 512 as default if no max_length is found 
+stride = max_length // 2
+print(f"\nUsed stride: {stride}")
 
 # Read text file
 text_file = "Clausthal.txt"
-with open(f"./Datasets/GraSSCo/corpus/{text_file}", "r", encoding="utf-8") as f:
+with open(f"./data/GraSCCo/corpus/{text_file}", "r", encoding="utf-8") as f:
     text = f.read()
-
-# Model properties
-max_length = tokenizer.model_max_length
-stride = max_length // 2  # Stride is half the max_length for overlapping chunks
-print(f"\nModel's max input length: {max_length} tokens")
-print(f"Used stride: {stride}")
 
 # Process the text in chunks
 ner_results = []
@@ -80,12 +83,6 @@ print("\n[bold underline]Recognized Entities:[/bold underline]")
 for result in ner_results:
     print(f"{result['word']} [{result['entity']}], Score: {result['score']:.2f}")
 
-# Print supported entities
-supported_entities = set(label.split("-")[-1] for label in model.config.id2label.values() if label != "O")
-print("\n[bold underline]Supported Entities:[/bold underline]")
-for entity in sorted(supported_entities):
-    print(f"• {entity}")
-
 # Annotate the original text
 annotated_text = Text()
 
@@ -108,95 +105,3 @@ annotated_text.append(text[last_end:])
 # Print annotated text
 print("\n[bold underline]Annotated Text:[/bold underline]")
 print(annotated_text)
-
-
-
-""" 
-Vizualization of recognized ents with iPython in table quite ok. But colored rich text is easier to read.
---------------------------------------------------------------------
-import pandas as pd
-from IPython.display import display
-
-# Process and organize the data
-entity_data = [
-    {
-        "Entity Type": entity['entity'],
-        "Text": text[entity['start']:entity['end']],
-        "Score": entity['score'],
-        "Start Position": entity['start'],
-        "End Position": entity['end']
-    }
-    for entity in ner_results
-]
-
-# Create a DataFrame
-df = pd.DataFrame(entity_data)
-
-# Display the table
-display(df) """
-
-
-""" 
-Vizualization with termocolor (coloring the annotated text in the terminal) caused problems with ANSI signs, that were generated and made the output partially unreadable
---------------------------------------------------------
-from termcolor import colored
-
-# Highlight entities in the text with different colors
-highlighted_text = text
-# If the entity isn't found in the dictionary of entities, get() returns "cyan" as the default
-for entity in sorted(ner_results, key=lambda x: x['start'], reverse=True):
-    color = {
-    "LOC": "green",
-    "PER": "blue",
-    "ORG": "red",
-    "MISC": "yellow"
-    }.get(entity['entity'].split("-")[-1], "cyan") # split because of the prefixes
-    entity_text = text[entity['start']:entity['end']]
-    highlighted_text = (
-        highlighted_text[:entity['start']] +
-        colored(entity_text, color) +
-        highlighted_text[entity['end']:]
-    ) """
-
-
-""" 
-Visualization with displacy from spacy (showing the annotated text in html) not working properly. To few ents get converted into spacy ents.
------------------------------------------------------------------
-from spacy.tokens import Span
-from spacy.lang.de import German
-from spacy import displacy
-
-# Create a spaCy document
-nlp_spacy = German()
-doc = nlp_spacy(text)
-
-# Map character offsets to token indices
-ents = []
-for ent in ner_results:
-    label = ent['entity'].split("-")[-1]  # Remove prefixes like B- or I-
-    span = doc.char_span(ent['start'], ent['end'], label=label)
-    if span:
-        ents.append(span)
-
-# Assign entities: Check for overlaps and assign safely
-if ents:
-    try:
-        # Try assigning to doc.ents (only if no overlaps)
-        doc.ents = ents
-        print(f"Assigned {len(doc.ents)} entities to `doc.ents`.")
-        displacy.serve(doc, style="ent", options={"compact": False, "fine_grained": True, "limit": 0}, port=5000)
-    except ValueError:
-        # Handle overlapping entities using spans
-        print("Overlapping entities detected, using `doc.spans['entities']`.")
-        doc.spans["entities"] = ents
-        
-        # Render using displacy.render() with spans_key
-        html = displacy.render(
-            doc, style="ent", spans_key="entities", options={"compact": False, "fine_grained": True, "limit": 0}
-        )
-        
-        from IPython.core.display import display, HTML
-        display(HTML(html))
-else:
-    print("No entities found.")
- """

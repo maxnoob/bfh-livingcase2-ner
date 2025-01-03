@@ -1,4 +1,3 @@
-from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 from rich import print
 from rich.text import Text
 import pandas as pd
@@ -14,14 +13,15 @@ from query_model_info import get_full_model_info
 # ------------ LOADING MODEL --------------
 
 # previously used:
-# dslim/bert-large-NER,
-# HUMADEX/german_medical_ner,
-# mschiesser/ner-bert-german: not too bad for person names, sees some diagnoses as orgniasations and medications as locations
+# mschiesser/ner-bert-german (tagging: BIO): not too bad for person names, sees some diagnoses as organisations and medications as locations
 # domischwimmbeck/bert-base-german-cased-fine-tuned-ner (434 MB) -> error while loading the model
-# StanfordAIMI/stanford-deidentifier-base: doesn't annotate in BIO format! annotates entities only. problem arises in span alignment.
+# StanfordAIMI/stanford-deidentifier-base (no tagging format; annotates entities only. problem arises in span alignment.)
+# HUMADEX/german_medical_ner (tagging: BIE -> unsupported yet)
+# dslim/bert-large-NER (tagging: BIO)
+
 
 # Load model and tokenizer
-# NOTE: mschiesser/ner-bert-german is the only one that properly works for benchmarking
+# NOTE: mschiesser/ner-bert-german is the only model that properly works for benchmarking
 model_name = "mschiesser/ner-bert-german"
 tokenizer_name = model_name
 
@@ -33,52 +33,13 @@ nlp = loaded_model["nlp_pipeline"]
 # Calculate stride
 max_length = loaded_model.get("tokenizers_max_token_length", 512) # use 512 as default if no max_length is found 
 stride = max_length // 2
-print(f"\nUsed stride: {stride}")
-
-""" 
-print(f"Loading Tokenzier: {tokenizer_name}")
-tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-print(f"Loading model: {model_name}")
-model = AutoModelForTokenClassification.from_pretrained(model_name)
-nlp = pipeline("ner", model=model, tokenizer=tokenizer)
-
-# Extract model properties
-model_properties = {
-    "Model name": getattr(model, 'name_or_path', 'Unknown'),
-    "Base model": model.config.architectures if hasattr(model.config, "architectures") else "Unknown",
-    "Model type": model.config.model_type if hasattr(model.config, "model_type") else "Unknown",
-    "Number of labels": model.config.num_labels if hasattr(model.config, "num_labels") else "Unknown", # label number is higher that entity number ('B-LOC', 'I-LOC', 'B-ORG', 'I-ORG', 'B-PER', 'I-PER', 'O')
-    "Tokenizer name": tokenizer.name_or_path,
-    "Tokenizer's max input length (# of tokens)": tokenizer.model_max_length, # Typically 512 for BERT
-}
-
-# Print extracted properties
-print("\n[bold underline]Model properties[/bold underline]")
-for prop, value in model_properties.items():
-    print(f"{prop}: {value}")
-
-# Calculate stride
-max_length = model_properties.get("Tokenizer's max input length (# of tokens)", 512) # use 512 as default if no max_length is found 
-stride = max_length // 2
-print(f"\nUsed stride: {stride}")
-
-# Extract supported entities from the model
-supported_entities = set()
-for label in model.config.id2label.values():
-    if label != "O":
-        supported_entities.add(label.split("-")[-1])
-
-# Print supported entities
-print("\n[bold underline]Supported Entities by the Model:[/bold underline]")
-for entity in sorted(supported_entities):
-    print(f"• {entity}") """
-    
+print(f"\nUsed stride: {stride}")    
     
 # ---------- PROCESSING SINGLE FILE TEXT DATA -------------
 
 # Read text file
 text_file = "Clausthal.txt"
-with open(f"./data/GraSSCo/corpus/{text_file}", "r", encoding="utf-8") as f:
+with open(f"./data/grascco/corpus/{text_file}", "r", encoding="utf-8") as f:
     text = f.read()
 
 # Process the text in chunks
@@ -274,7 +235,7 @@ entity_mapping_stanford_deidentifier_base = {
 # ------ PROCESS JSON FILES AND MAP ANNOTATIONS --------
 
 # Batch file processing
-input_dir = "./data/GraSSCo/annotation/grascco_phi_annotation_json/"
+input_dir = "./data/grascco/annotation/grascco_phi_annotation_json/"
 json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
 
 # Initialize evaluation containers
@@ -351,7 +312,7 @@ for json_file in json_files:
     except ValueError as e:
         # abort execution
         print(f"Error: {e}")
-        print("Aborting execution due to unsupported model.")
+        print("Aborting execution due to unsupported model for benchmarking.")
         exit(1)  # exit with a non-zero status
     
     # Update global counts before alignment
@@ -425,7 +386,7 @@ sns.heatmap(
     vmin=0, 
     vmax=500 
 )
-plt.title(f"Confusion Matrix of {model_name} used on the GraSCCO dataset")
+plt.title(f"Confusion Matrix of {model_name} used on the GraSCCo dataset")
 plt.show()
 
 
